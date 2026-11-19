@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Printer } from 'lucide-react';
 
 export default function PatientDetails({
@@ -42,6 +42,13 @@ export default function PatientDetails({
     dosage: '1 globule stat',
     days: '15 days'
   });
+
+  // Keep case sheet synchronized if updated by another user or when active patient switches
+  useEffect(() => {
+    if (patient?.caseSheet) {
+      setCaseSheet(patient.caseSheet);
+    }
+  }, [patient?.fileId, patient?.caseSheet]);
 
   if (!patient) return null;
 

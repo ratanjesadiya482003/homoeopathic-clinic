@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
@@ -10,41 +10,15 @@ import BookAppointmentWizard from './components/BookAppointmentWizard';
 import MateriaMedica from './components/MateriaMedica';
 import ClinicInfo from './components/ClinicInfo';
 import Toast from './components/Toast';
-
-import {
-  INITIAL_PATIENTS,
-  INITIAL_APPOINTMENTS,
-  INITIAL_EXPENSES
-} from './data/mockData';
+import { syncService } from './services/syncService';
 
 export default function App() {
-  // Local storage synced states
-  const [patients, setPatients] = useState(() => {
-    try {
-      const saved = localStorage.getItem('_react_patients');
-      return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
-    } catch {
-      return INITIAL_PATIENTS;
-    }
-  });
-
-  const [appointments, setAppointments] = useState(() => {
-    try {
-      const saved = localStorage.getItem('_react_appointments');
-      return saved ? JSON.parse(saved) : INITIAL_APPOINTMENTS;
-    } catch {
-      return INITIAL_APPOINTMENTS;
-    }
-  });
-
-  const [expenses, setExpenses] = useState(() => {
-    try {
-      const saved = localStorage.getItem('_react_expenses');
-      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
-    } catch {
-      return INITIAL_EXPENSES;
-    }
-  });
+  // Live Synced Global States (Initialized from Central Database & Local Cache)
+  const [patients, setPatients] = useState(() => syncService.data.patients);
+  const [appointments, setAppointments] = useState(() => syncService.data.appointments);
+  const [expenses, setExpenses] = useState(() => syncService.data.expenses);
+  const [syncStatus, setSyncStatus] = useState(() => syncService.getStatus());
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Routing state
   const [currentView, setCurrentView] = useState('dashboard');
@@ -55,26 +29,53 @@ export default function App() {
   // Toasts
   const [toasts, setToasts] = useState([]);
 
-  useEffect(() => {
-    localStorage.setItem('_react_patients', JSON.stringify(patients));
-  }, [patients]);
-
-  useEffect(() => {
-    localStorage.setItem('_react_appointments', JSON.stringify(appointments));
-  }, [appointments]);
-
-  useEffect(() => {
-    localStorage.setItem('_react_expenses', JSON.stringify(expenses));
-  }, [expenses]);
-
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, message, type }]);
-  };
+  }, []);
 
   const handleDismissToast = (id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // Central Real-Time Synchronization Listener
+  useEffect(() => {
+    syncService.init();
+
+    const unsubData = syncService.subscribe((event) => {
+      if (event.data) {
+        setPatients(event.data.patients);
+        setAppointments(event.data.appointments);
+        setExpenses(event.data.expenses);
+      }
+
+      // If change was made by another user/device/tab, notify user
+      if (event.isRemoteUserAction) {
+        if (event.action === 'EDIT_PATIENT') {
+          showToast('🔄 Real-time Sync: Patient record updated by another user.', 'info');
+        } else if (event.action === 'ADD_PATIENT') {
+          showToast('🔄 Real-time Sync: New patient added by another user.', 'info');
+        } else if (event.action === 'DELETE_PATIENT') {
+          showToast('🔄 Real-time Sync: Patient record removed by another user.', 'info');
+        } else if (event.action === 'SAVE_APPOINTMENT' || event.action === 'UPDATE_APPT_STATUS') {
+          showToast('🔄 Real-time Sync: Appointments updated by another user.', 'info');
+        } else if (event.action === 'ADD_EXPENSE' || event.action === 'DELETE_EXPENSE') {
+          showToast('🔄 Real-time Sync: Clinic expenses updated by another user.', 'info');
+        } else if (event.action === 'RESET_DATA') {
+          showToast('🔄 Real-time Sync: Clinic database reset to demo state.', 'warning');
+        }
+      }
+    });
+
+    const unsubStatus = syncService.subscribeStatus((status) => {
+      setSyncStatus(status);
+    });
+
+    return () => {
+      unsubData();
+      unsubStatus();
+    };
+  }, [showToast]);
 
   const navigateTo = (view, param = null) => {
     setCurrentView(view);
@@ -87,13 +88,13 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Patient CRUD
-  const handleSavePatient = (formData, isEdit) => {
+  // Patient CRUD (Synced in Real-Time to All Users)
+  const handleSavePatient = async (formData, isEdit) => {
     if (isEdit) {
-      setPatients((prev) =>
-        prev.map((p) => (p.fileId === formData.fileId ? { ...p, ...formData } : p))
-      );
-      showToast(`Patient ${formData.fileId} updated successfully!`, 'success');
+      const existing = patients.find(p => p.fileId === formData.fileId) || {};
+      const fullRecord = { ...existing, ...formData };
+      await syncService.savePatient(fullRecord, true);
+      showToast(`Patient ${formData.fileId} updated across all users!`, 'success');
     } else {
       const newPatient = {
         ...formData,
@@ -103,18 +104,18 @@ export default function App() {
         appointments: [],
         followUps: []
       };
-      setPatients((prev) => [newPatient, ...prev]);
-      showToast(`Patient ${formData.firstName} added successfully!`, 'success');
+      await syncService.savePatient(newPatient, false);
+      showToast(`Patient ${formData.firstName} added and synced to all devices!`, 'success');
     }
     navigateTo('patients');
   };
 
-  const handleDeletePatient = (fileId) => {
+  const handleDeletePatient = async (fileId) => {
     const p = patients.find((x) => x.fileId === fileId);
     if (!p) return;
-    if (confirm(`Are you sure you want to delete patient record: ${p.firstName} ${p.lastName} (${p.fileId})?`)) {
-      setPatients((prev) => prev.filter((x) => x.fileId !== fileId));
-      showToast(`Patient record ${fileId} deleted.`, 'danger');
+    if (window.confirm(`Are you sure you want to delete patient: ${p.firstName} ${p.lastName} (${p.fileId})? This will immediately remove it for all users.`)) {
+      await syncService.deletePatient(fileId);
+      showToast(`Patient ${fileId} deleted and updated for all users.`, 'danger');
     }
   };
 
@@ -123,30 +124,49 @@ export default function App() {
     navigateTo('edit-patient');
   };
 
-  const handleUpdatePatientDetails = (fileId, updatedRecord) => {
-    setPatients((prev) =>
-      prev.map((p) => (p.fileId === fileId ? { ...p, ...updatedRecord } : p))
-    );
+  const handleUpdatePatientDetails = async (fileId, updatedRecord) => {
+    await syncService.updatePatientDetails(fileId, updatedRecord);
   };
 
-  // Appointment operations
-  const handleUpdateApptStatus = (id, newStatus) => {
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
-    );
+  // Appointment operations (Synced in Real-Time)
+  const handleUpdateApptStatus = async (id, newStatus) => {
+    await syncService.updateApptStatus(id, newStatus);
   };
 
-  const handleBookConfirmed = (newAppt) => {
-    setAppointments((prev) => [newAppt, ...prev]);
+  const handleBookConfirmed = async (newAppt) => {
+    await syncService.saveAppointment(newAppt, false);
+    showToast('Appointment booked and synced to all devices!', 'success');
   };
 
-  const handleAddNewPatientFromBooking = (newPatientRecord) => {
-    setPatients((prev) => [newPatientRecord, ...prev]);
+  const handleAddNewPatientFromBooking = async (newPatientRecord) => {
+    await syncService.savePatient(newPatientRecord, false);
   };
 
-  // Expense operations
-  const handleAddExpense = (newExpense) => {
-    setExpenses((prev) => [{ ...newExpense, id: Date.now() }, ...prev]);
+  // Expense operations (Synced in Real-Time)
+  const handleAddExpense = async (newExpense) => {
+    await syncService.saveExpense(newExpense);
+  };
+
+  const handleDeleteExpense = async (id) => {
+    await syncService.deleteExpense(id);
+    showToast('Expense record deleted and synced.', 'info');
+  };
+
+  // Manual Refresh & Reset
+  const handleRefreshSync = async () => {
+    setIsRefreshing(true);
+    await syncService.fetchServerData(true);
+    setTimeout(() => {
+      setIsRefreshing(false);
+      showToast('Central database synchronized across all users.', 'success');
+    }, 400);
+  };
+
+  const handleResetDatabase = async () => {
+    if (window.confirm('Reset all patients, appointments and expenses to the initial clinic demo data? All users will immediately see the reset data.')) {
+      await syncService.resetToDefault();
+      showToast('Clinic database reset to initial demo state.', 'warning');
+    }
   };
 
   // Titles mapping
@@ -179,6 +199,9 @@ export default function App() {
         <Navbar
           title={titles[currentView] || ' Homoeopathy'}
           navigateTo={navigateTo}
+          syncStatus={syncStatus}
+          onRefreshSync={handleRefreshSync}
+          isRefreshing={isRefreshing}
         />
 
         <div className="page-content">
@@ -187,6 +210,7 @@ export default function App() {
               appointments={appointments}
               expenses={expenses}
               onAddExpense={handleAddExpense}
+              onDeleteExpense={handleDeleteExpense}
               onUpdateApptStatus={handleUpdateApptStatus}
               onViewPatientDetails={(fileId) => navigateTo('patient-details', fileId)}
               navigateTo={navigateTo}
@@ -265,7 +289,17 @@ export default function App() {
 
           {currentView === 'materia-medica' && <MateriaMedica />}
 
-          {currentView === 'clinic-info' && <ClinicInfo />}
+          {currentView === 'clinic-info' && (
+            <ClinicInfo
+              patients={patients}
+              appointments={appointments}
+              expenses={expenses}
+              syncStatus={syncStatus}
+              onRefreshSync={handleRefreshSync}
+              onResetDatabase={handleResetDatabase}
+              showToast={showToast}
+            />
+          )}
         </div>
       </div>
 
@@ -273,4 +307,3 @@ export default function App() {
     </div>
   );
 }
-

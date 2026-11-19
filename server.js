@@ -1,16 +1,20 @@
 /**
  * Production & Preview Server for  Homoeopathy React Web App
+ * Features real-time multi-user live sync API & Server-Sent Events (SSE)
  */
 
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
+import { handleApiRequest } from './server/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0'; // Bind to all interfaces for clinic LAN/Wi-Fi access
 const DIST_DIR = path.join(__dirname, 'dist');
 const BASE_DIR = fs.existsSync(DIST_DIR) ? DIST_DIR : __dirname;
 
@@ -27,6 +31,12 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
+  // Handle API & Real-time Live Sync endpoints
+  if (req.url && (req.url.startsWith('/api/') || req.url === '/api')) {
+    handleApiRequest(req, res);
+    return;
+  }
+
   let reqPath = req.url.split('?')[0];
   if (reqPath === '/' || reqPath === '') {
     reqPath = '/index.html';
@@ -53,10 +63,25 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
+  // Get LAN IPs
+  const nets = os.networkInterfaces();
+  const lanIps = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        lanIps.push(net.address);
+      }
+    }
+  }
+
   console.log(`=======================================================`);
-  console.log(`⚛️   Homoeopathy React Website Running!`);
-  console.log(`🌐 Local URL: http://localhost:${PORT}`);
+  console.log(`⚛️   Homoeopathy Multi-User Clinic Server Running!`);
+  console.log(`🌐 Local Device URL : http://localhost:${PORT}`);
+  lanIps.forEach(ip => {
+    console.log(`📱 Other Clinic PCs/Mobiles : http://${ip}:${PORT}`);
+  });
+  console.log(`📡 Real-Time SSE Sync: Active (/api/events)`);
   console.log(`📁 Serving directory: ${BASE_DIR}`);
   console.log(`=======================================================`);
 });

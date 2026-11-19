@@ -101,3 +101,16 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Windows 1-Click Launcher:
 Double click [start.bat](file:///C:/Users/Administrator/.gemini/antigravity/scratch/-homeopathy-clinic/start.bat).
+
+
+---
+
+## 🔄 Real-Time Multi-User Synchronization (All Users See Identical Live Data)
+
+The clinic management system now features a full real-time synchronization engine and central database:
+
+- **Central JSON Database**: Stored in `data/clinic_db.json`.
+- **Real-Time Server-Sent Events (SSE)**: Broadcasts any change (add, edit, delete) instantly to all connected users and devices without requiring page refresh.
+- **Cross-Tab Synchronization**: Powered by the browser `BroadcastChannel` for instantaneous zero-latency updates across all open tabs.
+- **Local Network / Multi-Device Access**: Both `npm run dev` and `node server.js` bind to `0.0.0.0:3000`. Any computer, tablet, or smartphone on the clinic Wi-Fi or LAN can open `http://<clinic-pc-ip>:3000` to manage records simultaneously.
+- **Live Sync Badge in Navbar**: Shows connection state with a live green pulse indicator and last-synced timestamp, plus a manual "Sync Now" button.

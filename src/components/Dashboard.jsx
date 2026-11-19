@@ -4,6 +4,7 @@ export default function Dashboard({
   appointments,
   expenses,
   onAddExpense,
+  onDeleteExpense,
   onUpdateApptStatus,
   onViewPatientDetails,
   navigateTo,
@@ -152,13 +153,34 @@ export default function Dashboard({
           {/* Recent expenses list */}
           <div style={{ marginTop: 10, fontSize: 13, color: '#475569' }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Recent Recorded Expenses:</div>
-            <ul style={{ listStyleType: 'disc', paddingLeft: 20 }}>
-              {expenses.slice(0, 4).map((exp, i) => (
-                <li key={i}>
-                  <b>{exp.branch}:</b> {exp.title} — ₹{exp.amount}{' '}
-                  <span style={{ color: '#94a3b8', fontSize: 11 }}>({exp.date})</span>
-                </li>
-              ))}
+            <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0 }}>
+              {expenses.length === 0 ? (
+                <li style={{ color: '#94a3b8', fontStyle: 'italic' }}>No expenses recorded yet.</li>
+              ) : (
+                expenses.slice(0, 6).map((exp, i) => (
+                  <li key={exp.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px dashed #e2e8f0' }}>
+                    <div>
+                      <b>{exp.branch}:</b> {exp.title} — <span style={{ color: '#0f766e', fontWeight: 600 }}>₹{exp.amount}</span>{' '}
+                      <span style={{ color: '#94a3b8', fontSize: 11 }}>({exp.date})</span>
+                    </div>
+                    {onDeleteExpense && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-xs"
+                        style={{ padding: '2px 8px', fontSize: 11 }}
+                        onClick={() => {
+                          if (window.confirm(`Delete expense "${exp.title}" (₹${exp.amount})? This will update for all users.`)) {
+                            onDeleteExpense(exp.id);
+                          }
+                        }}
+                        title="Delete expense"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </li>
+                ))
+              )}
             </ul>
           </div>
         </div>
