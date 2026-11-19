@@ -1,7 +1,7 @@
 @echo off
-title Ansh Homoeopathy React App
+title  Homoeopathy React App
 echo =======================================================
-echo Starting Ansh Homoeopathy React Website...
+echo Starting  Homoeopathy React Website...
 echo =======================================================
 start http://localhost:3000
 npm run dev

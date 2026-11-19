@@ -51,7 +51,7 @@ export default function PatientList({
             >
               <option value="Head Branch">Head Branch</option>
               <option value="Pal Branch">Pal Branch</option>
-              <option value="Ansh Camp">Ansh Camp</option>
+              <option value=" Camp"> Camp</option>
               <option value="All">All Branches</option>
             </select>
           </div>

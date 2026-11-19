@@ -47,7 +47,7 @@ export default function ClinicInfo() {
             <p style={{ fontSize: 12, color: '#64748b' }}>Phone: +91 88666 82419 | Open: Tue & Thu (5pm - 9pm)</p>
           </div>
           <div>
-            <h5 style={{ fontWeight: 700, color: '#0284c7' }}>3. Ansh Camp (Charitable Clinic)</h5>
+            <h5 style={{ fontWeight: 700, color: '#0284c7' }}>3.  Camp (Charitable Clinic)</h5>
             <p style={{ fontSize: 13, color: '#475569' }}>Community Center, Udhna Gam</p>
             <p style={{ fontSize: 12, color: '#64748b' }}>Sunday Camp (9am - 1pm)</p>
           </div>

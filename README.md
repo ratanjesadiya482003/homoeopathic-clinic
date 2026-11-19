@@ -1,4 +1,4 @@
-# Ansh Homoeopathy - React Web Application
+#  Homoeopathy - React Web Application
 
 **Advanced Neuro-psychiatric Homoeopathy**  
 Chief Consultant: **Dr. Divya Devani** (B.H.M.S., MD Hom.)
@@ -10,7 +10,7 @@ A fully functional **React (Vite + Modern ES Modules)** clinic management & elec
 ## 🏗️ Architecture & Component Hierarchy
 
 ```
-ansh-homeopathy-clinic/
+-homeopathy-clinic/
 ├── src/
 │   ├── main.jsx                       # React entry point
 │   ├── App.jsx                        # Main state, routing & CRUD coordinator
@@ -18,7 +18,7 @@ ansh-homeopathy-clinic/
 │   ├── data/
 │   │   └── mockData.js                # Initial dataset matching all 12 screenshots
 │   └── components/
-│       ├── Sidebar.jsx                # Ansh leaf badge, navigation & doctor profile
+│       ├── Sidebar.jsx                #  leaf badge, navigation & doctor profile
 │       ├── Navbar.jsx                 # Quick actions (+ Book Appointment, + Add Patient)
 │       ├── Dashboard.jsx              # Today's appointments, clinic expenses, duty info (Img 12)
 │       ├── PatientList.jsx            # Search, branch filter, table actions (Img 2)
@@ -49,7 +49,7 @@ ansh-homeopathy-clinic/
    - Holidays & Upcoming Events tables.
 
 2. **Patient Directory** (*Image 2*):
-   - Branch filter (`Head Branch`, `Pal Branch`, `Ansh Camp`, `All Branches`).
+   - Branch filter (`Head Branch`, `Pal Branch`, ` Camp`, `All Branches`).
    - Instant search across `Name`, `Email`, `Mobile`, `File ID`, and `Blood Group`.
    - Action buttons: `Edit`, `Delete`, `Details`, and `Book Appointment`.
    - Seeded with patient records from screenshots (*Nishiv Viraj Kansagra 0842, Vipex Dhanjibhai Jasoliya 06986, Keyur Mukheshbhai Patel 06985, Bhumika Rakesh Kathiriya 06984, Aditi Raviprakash Rajput 06982, Bhakti Pansala 06983, Nency Viradiya 06981*).
@@ -87,7 +87,7 @@ ansh-homeopathy-clinic/
 
 ### Development Server:
 ```bash
-cd "C:\Users\Administrator\.gemini\antigravity\scratch\ansh-homeopathy-clinic"
+cd "C:\Users\Administrator\.gemini\antigravity\scratch\-homeopathy-clinic"
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) or [http://localhost:5173](http://localhost:5173).
@@ -100,4 +100,4 @@ node server.js
 Open [http://localhost:3000](http://localhost:3000).
 
 ### Windows 1-Click Launcher:
-Double click [start.bat](file:///C:/Users/Administrator/.gemini/antigravity/scratch/ansh-homeopathy-clinic/start.bat).
+Double click [start.bat](file:///C:/Users/Administrator/.gemini/antigravity/scratch/-homeopathy-clinic/start.bat).

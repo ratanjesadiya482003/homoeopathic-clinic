@@ -27,7 +27,7 @@ export default function Sidebar({ currentView, navigateTo, showToast }) {
             <path d="M12 2C8 6 4 9 4 14a8 8 0 0 0 16 0c0-5-4-8-8-12zm0 18a6 6 0 0 1-6-6c0-3.5 3-6.2 6-9.5 3 3.3 6 6 6 9.5a6 6 0 0 1-6 6z" />
             <path d="M12 18V9" />
           </svg>
-          <div className="logo-text-ansh">Ansh</div>
+          <div className="logo-text-"></div>
           <div className="logo-text-sub">Homoeopathy</div>
         </div>
       </div>

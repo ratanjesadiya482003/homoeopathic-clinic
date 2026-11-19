@@ -32,7 +32,7 @@ export default function AppointmentSchedule({
           <div>
             <label className="form-label">Branch</label>
             <div className="radio-group">
-              {['Head Branch', 'Pal Branch', 'Ansh Camp'].map((branch) => (
+              {['Head Branch', 'Pal Branch', ' Camp'].map((branch) => (
                 <label key={branch} className="radio-label">
                   <input
                     type="radio"

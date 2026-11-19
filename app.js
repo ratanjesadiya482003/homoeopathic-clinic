@@ -1,5 +1,5 @@
 /**
- * ANSH HOMOEOPATHY - CLINIC MANAGEMENT SYSTEM
+ *  HOMOEOPATHY - CLINIC MANAGEMENT SYSTEM
  * Advanced Neuro-psychiatric Homoeopathy
  * Application State, Routing & Interaction Engine
  */
@@ -370,9 +370,9 @@ const MATERIA_MEDICA_DB = [
 
 class ClinicStore {
   constructor() {
-    this.patients = this.load("ansh_patients", INITIAL_PATIENTS);
-    this.appointments = this.load("ansh_appointments", INITIAL_APPOINTMENTS);
-    this.expenses = this.load("ansh_expenses", INITIAL_EXPENSES);
+    this.patients = this.load("_patients", INITIAL_PATIENTS);
+    this.appointments = this.load("_appointments", INITIAL_APPOINTMENTS);
+    this.expenses = this.load("_expenses", INITIAL_EXPENSES);
     this.activePatientId = "0842";
   }
 
@@ -387,9 +387,9 @@ class ClinicStore {
 
   save() {
     try {
-      localStorage.setItem("ansh_patients", JSON.stringify(this.patients));
-      localStorage.setItem("ansh_appointments", JSON.stringify(this.appointments));
-      localStorage.setItem("ansh_expenses", JSON.stringify(this.expenses));
+      localStorage.setItem("_patients", JSON.stringify(this.patients));
+      localStorage.setItem("_appointments", JSON.stringify(this.appointments));
+      localStorage.setItem("_expenses", JSON.stringify(this.expenses));
     } catch (e) {
       console.warn("LocalStorage save error", e);
     }
@@ -473,7 +473,7 @@ function navigateTo(viewId, param = null) {
     "materia-medica": "Materia Medica Reference",
     "clinic-info": "Clinic Information & Doctors"
   };
-  document.getElementById("page-header-title").textContent = titles[viewId] || "Ansh Homoeopathy";
+  document.getElementById("page-header-title").textContent = titles[viewId] || " Homoeopathy";
 
   // View specific setups
   if (viewId === "dashboard") {
@@ -1429,7 +1429,7 @@ function formatDatePretty(dateStr) {
   const day = d.getDate();
   const suffix = (day === 1 || day === 21 || day === 31) ? "st"
     : (day === 2 || day === 22) ? "nd"
-    : (day === 3 || day === 23) ? "rd" : "th";
+      : (day === 3 || day === 23) ? "rd" : "th";
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${day}${suffix} ${months[d.getMonth()]}, ${d.getFullYear()}`;

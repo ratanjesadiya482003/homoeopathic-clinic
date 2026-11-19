@@ -639,11 +639,11 @@ export default function PatientDetails({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #00a8e8', paddingBottom: 20, marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div className="logo-badge" style={{ width: 60, height: 60 }}>
-                  <div className="logo-text-ansh" style={{ fontSize: 9 }}>Ansh</div>
+                  <div className="logo-text-" style={{ fontSize: 9 }}></div>
                   <div className="logo-text-sub" style={{ fontSize: 6.5 }}>Homoeopathy</div>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0284c7', margin: 0 }}>Ansh Homoeopathy Clinic</h2>
+                  <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0284c7', margin: 0 }}> Homoeopathy Clinic</h2>
                   <p style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', margin: 0 }}>Advanced Neuro-psychiatric Homoeopathy</p>
                   <p style={{ fontSize: 11.5, color: '#64748b', margin: 0 }}>Head Branch: Surat, Gujarat | Mob: +91 99784 32492</p>
                 </div>

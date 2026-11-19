@@ -21,7 +21,7 @@ export default function App() {
   // Local storage synced states
   const [patients, setPatients] = useState(() => {
     try {
-      const saved = localStorage.getItem('ansh_react_patients');
+      const saved = localStorage.getItem('_react_patients');
       return saved ? JSON.parse(saved) : INITIAL_PATIENTS;
     } catch {
       return INITIAL_PATIENTS;
@@ -30,7 +30,7 @@ export default function App() {
 
   const [appointments, setAppointments] = useState(() => {
     try {
-      const saved = localStorage.getItem('ansh_react_appointments');
+      const saved = localStorage.getItem('_react_appointments');
       return saved ? JSON.parse(saved) : INITIAL_APPOINTMENTS;
     } catch {
       return INITIAL_APPOINTMENTS;
@@ -39,7 +39,7 @@ export default function App() {
 
   const [expenses, setExpenses] = useState(() => {
     try {
-      const saved = localStorage.getItem('ansh_react_expenses');
+      const saved = localStorage.getItem('_react_expenses');
       return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
     } catch {
       return INITIAL_EXPENSES;
@@ -56,15 +56,15 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
-    localStorage.setItem('ansh_react_patients', JSON.stringify(patients));
+    localStorage.setItem('_react_patients', JSON.stringify(patients));
   }, [patients]);
 
   useEffect(() => {
-    localStorage.setItem('ansh_react_appointments', JSON.stringify(appointments));
+    localStorage.setItem('_react_appointments', JSON.stringify(appointments));
   }, [appointments]);
 
   useEffect(() => {
-    localStorage.setItem('ansh_react_expenses', JSON.stringify(expenses));
+    localStorage.setItem('_react_expenses', JSON.stringify(expenses));
   }, [expenses]);
 
   const showToast = (message, type = 'success') => {
@@ -177,7 +177,7 @@ export default function App() {
       {/* Main Content Area */}
       <div className="main-wrapper">
         <Navbar
-          title={titles[currentView] || 'Ansh Homoeopathy'}
+          title={titles[currentView] || ' Homoeopathy'}
           navigateTo={navigateTo}
         />
 

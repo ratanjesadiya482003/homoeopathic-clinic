@@ -296,10 +296,10 @@ export default function PatientForm({
                   <input
                     type="radio"
                     name="form-branch"
-                    value="Ansh Camp"
-                    checked={formData.branch === 'Ansh Camp'}
-                    onChange={() => handleChange('branch', 'Ansh Camp')}
-                  /> Ansh Camp
+                    value=" Camp"
+                    checked={formData.branch === ' Camp'}
+                    onChange={() => handleChange('branch', ' Camp')}
+                  />  Camp
                 </label>
               </div>
             </div>

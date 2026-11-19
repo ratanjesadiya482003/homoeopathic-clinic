@@ -125,7 +125,7 @@ export default function Dashboard({
               >
                 <option value="Head Branch">Head Branch</option>
                 <option value="Pal Branch">Pal Branch</option>
-                <option value="Ansh Camp">Ansh Camp</option>
+                <option value=" Camp"> Camp</option>
               </select>
             </div>
             <div className="form-group">
@@ -188,13 +188,13 @@ export default function Dashboard({
               </text>
               <g transform="translate(60, 65) scale(0.75)">
                 <path fill="none" stroke="#1e293b" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
-                  d="M120,40 C90,40 60,60 50,90 C40,120 40,150 50,180 C60,200 80,210 110,210 C110,170 115,130 120,40 Z"/>
+                  d="M120,40 C90,40 60,60 50,90 C40,120 40,150 50,180 C60,200 80,210 110,210 C110,170 115,130 120,40 Z" />
                 <path fill="none" stroke="#1e293b" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"
-                  d="M120,40 C150,40 180,60 190,90 C200,120 200,150 190,180 C180,200 160,210 130,210 C130,170 125,130 120,40 Z"/>
+                  d="M120,40 C150,40 180,60 190,90 C200,120 200,150 190,180 C180,200 160,210 130,210 C130,170 125,130 120,40 Z" />
                 <path fill="none" stroke="#0284c7" strokeWidth="3" strokeLinecap="round"
-                  d="M70,90 C85,95 90,80 105,95 M65,130 C80,120 95,140 110,130 M70,165 C85,160 95,180 110,170"/>
+                  d="M70,90 C85,95 90,80 105,95 M65,130 C80,120 95,140 110,130 M70,165 C85,160 95,180 110,170" />
                 <path fill="none" stroke="#0284c7" strokeWidth="3" strokeLinecap="round"
-                  d="M170,90 C155,95 150,80 135,95 M175,130 C160,120 145,140 130,130 M170,165 C155,160 145,180 130,170"/>
+                  d="M170,90 C155,95 150,80 135,95 M175,130 C160,120 145,140 130,130 M170,165 C155,160 145,180 130,170" />
               </g>
             </svg>
           </div>

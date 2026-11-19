@@ -1,5 +1,5 @@
 /**
- * Production & Preview Server for Ansh Homoeopathy React Web App
+ * Production & Preview Server for  Homoeopathy React Web App
  */
 
 import http from 'http';
@@ -55,7 +55,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`⚛️  Ansh Homoeopathy React Website Running!`);
+  console.log(`⚛️   Homoeopathy React Website Running!`);
   console.log(`🌐 Local URL: http://localhost:${PORT}`);
   console.log(`📁 Serving directory: ${BASE_DIR}`);
   console.log(`=======================================================`);

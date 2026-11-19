@@ -1,5 +1,5 @@
 /* ==========================================================================
-   ANSH HOMOEOPATHY CLINIC MANAGEMENT SYSTEM
+    HOMOEOPATHY CLINIC MANAGEMENT SYSTEM
    React App Stylesheet
    ========================================================================== */
 
@@ -107,7 +107,7 @@ button, input, select, textarea {
   transform: scale(1.03);
 }
 
-.logo-text-ansh {
+.logo-text- {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;

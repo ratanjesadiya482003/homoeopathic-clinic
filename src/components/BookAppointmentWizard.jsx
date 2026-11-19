@@ -385,7 +385,7 @@ export default function BookAppointmentWizard({
                 >
                   <option value="Head Branch">Head Branch</option>
                   <option value="Pal Branch">Pal Branch</option>
-                  <option value="Ansh Camp">Ansh Camp</option>
+                  <option value=" Camp"> Camp</option>
                 </select>
               </div>
 
