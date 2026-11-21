@@ -105,12 +105,32 @@ Double click [start.bat](file:///C:/Users/Administrator/.gemini/antigravity/scra
 
 ---
 
-## 🔄 Real-Time Multi-User Synchronization (All Users See Identical Live Data)
+## 🌐 Cloud Deployment with Render (Data Sync Backend) + Netlify (Live Site)
 
-The clinic management system now features a full real-time synchronization engine and central database:
+To host your website live so that all users and devices worldwide share the same centralized database in real-time:
 
-- **Central JSON Database**: Stored in `data/clinic_db.json`.
-- **Real-Time Server-Sent Events (SSE)**: Broadcasts any change (add, edit, delete) instantly to all connected users and devices without requiring page refresh.
-- **Cross-Tab Synchronization**: Powered by the browser `BroadcastChannel` for instantaneous zero-latency updates across all open tabs.
-- **Local Network / Multi-Device Access**: Both `npm run dev` and `node server.js` bind to `0.0.0.0:3000`. Any computer, tablet, or smartphone on the clinic Wi-Fi or LAN can open `http://<clinic-pc-ip>:3000` to manage records simultaneously.
-- **Live Sync Badge in Navbar**: Shows connection state with a live green pulse indicator and last-synced timestamp, plus a manual "Sync Now" button.
+### Step 1: Deploy Backend to Render.com (Free)
+1. Go to [https://dashboard.render.com/](https://dashboard.render.com/) and sign in.
+2. Click **New +** > **Web Service**.
+3. Connect your GitHub repository (`homoeopathic-clinic`).
+4. Set the following options:
+   - **Name**: `homoeopathic-clinic-backend`
+   - **Environment**: `Node`
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `node server.js`
+   - **Plan**: `Free`
+5. Click **Create Web Service**.
+6. Once deployed, Render will provide a free live URL, for example:
+   ```
+   https://homoeopathic-clinic-backend.onrender.com
+   ```
+
+### Step 2: Link Netlify to Your Render Backend
+1. Go to your Netlify dashboard for your clinic website.
+2. Navigate to **Site configuration** > **Environment variables**.
+3. Add a new variable:
+   - **Key**: `VITE_API_URL`
+   - **Value**: `https://homoeopathic-clinic-backend.onrender.com` (your Render URL from Step 1)
+4. Trigger a **Clear cache and deploy site** on Netlify.
+
+Now, all users visiting your Netlify site will automatically connect to your centralized Render backend. Any patient added, appointment booked, or status changed will immediately synchronize to all users across all devices in real-time!

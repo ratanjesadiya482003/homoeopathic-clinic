@@ -8,6 +8,7 @@
  * - Automatic fallback background polling ensures all tabs/browsers/devices stay identical
  * - Cross-device and cross-user synchronization guaranteed
  * - Resilient network layer with auto-retry on 502/503/504 gateway cold-starts
+ * - Supports Render.com cloud backend (via VITE_API_URL) and local server
  */
 
 import { INITIAL_PATIENTS, INITIAL_APPOINTMENTS, INITIAL_EXPENSES } from '../data/mockData';
@@ -23,6 +24,12 @@ const LEGACY_STORAGE_KEYS = [
   '_react_sync_version',
   '_react_last_synced'
 ];
+
+// Backend API Base URL (Render.com URL or relative for local/proxy)
+const API_BASE = (
+  (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_API_URL || import.meta.env.VITE_RENDER_URL)) ||
+  ''
+).replace(/\/+$/, '');
 
 class ClinicSyncService {
   constructor() {
@@ -145,7 +152,7 @@ class ClinicSyncService {
     }
 
     try {
-      const url = '/api/events';
+      const url = `${API_BASE}/api/events`;
       this.eventSource = new EventSource(url);
 
       this.eventSource.onopen = () => {
@@ -214,7 +221,7 @@ class ClinicSyncService {
    */
   async checkServerStatusOrData() {
     try {
-      const { ok, status, json } = await this.safeFetch('/api/status', {
+      const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/status`, {
         headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
@@ -242,7 +249,7 @@ class ClinicSyncService {
    */
   async fetchServerData(notifyIfSame = true) {
     try {
-      const { ok, json } = await this.safeFetch('/api/data', {
+      const { ok, json } = await this.safeFetch(`${API_BASE}/api/data`, {
         headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
@@ -333,7 +340,7 @@ class ClinicSyncService {
    * Add or Edit Patient
    */
   async savePatient(patient, isEdit) {
-    const { ok, status, json } = await this.safeFetch('/api/patients', {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/patients`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patient, isEdit })
@@ -370,7 +377,7 @@ class ClinicSyncService {
    * Delete Patient
    */
   async deletePatient(fileId) {
-    const { ok, status, json } = await this.safeFetch(`/api/patients/${encodeURIComponent(fileId)}`, {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/patients/${encodeURIComponent(fileId)}`, {
       method: 'DELETE'
     });
 
@@ -407,7 +414,7 @@ class ClinicSyncService {
    * Add or Edit Appointment
    */
   async saveAppointment(appointment, isEdit = false) {
-    const { ok, status, json } = await this.safeFetch('/api/appointments', {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/appointments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appointment, isEdit })
@@ -457,7 +464,7 @@ class ClinicSyncService {
     });
 
     // 2. Commit to database with retry
-    const { ok, status, json } = await this.safeFetch('/api/appointments/status', {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/appointments/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status: newStatus })
@@ -491,7 +498,7 @@ class ClinicSyncService {
    * Delete Appointment
    */
   async deleteAppointment(id) {
-    const { ok, status, json } = await this.safeFetch(`/api/appointments/${encodeURIComponent(id)}`, {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/appointments/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     });
 
@@ -519,7 +526,7 @@ class ClinicSyncService {
    * Record Clinic Expense
    */
   async saveExpense(expense) {
-    const { ok, status, json } = await this.safeFetch('/api/expenses', {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/expenses`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expense })
@@ -550,7 +557,7 @@ class ClinicSyncService {
    * Delete Expense
    */
   async deleteExpense(id) {
-    const { ok, status, json } = await this.safeFetch(`/api/expenses/${encodeURIComponent(id)}`, {
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/expenses/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     });
 
@@ -561,7 +568,7 @@ class ClinicSyncService {
     this.currentVersion = json.version || this.currentVersion + 1;
     this.lastSyncedTime = new Date();
 
-    this.data.expenses = this.data.expenses.filter(e => String(e.id).trim().toLowerCase() !== String(id).trim().toLowerCase());
+    this.data.expenses = this.data.expenses.filter(e => String(e.id).trim() !== String(id));
 
     this.broadcastToTabs('DELETE_EXPENSE', this.data, this.currentVersion);
     this.notifySubscribers({
@@ -578,7 +585,7 @@ class ClinicSyncService {
    * Reset Central Database to Default Seed Data
    */
   async resetToDefault() {
-    const { ok, status, json } = await this.safeFetch('/api/reset', { method: 'POST' });
+    const { ok, status, json } = await this.safeFetch(`${API_BASE}/api/reset`, { method: 'POST' });
 
     if (!ok || !json.success) {
       throw new Error(json.error || `Failed to reset database (HTTP ${status})`);
