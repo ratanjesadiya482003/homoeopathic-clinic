@@ -2,7 +2,7 @@
  * Homoeopathy Clinic - Central Data Store & Real-Time Sync Server Engine
  * Powers multi-user synchronization across all tabs, computers, and devices.
  * Supports:
- * - Persistent JSON database storage (data/clinic_db.json)
+ * - Persistent JSON database storage (data/clinic_db.json or /tmp/clinic_db.json in serverless)
  * - REST API (/api/data, /api/patients, /api/appointments, /api/expenses)
  * - Real-Time Server-Sent Events (SSE) broadcasting (/api/events)
  * - Automatic seed initialization from src/data/mockData.js
@@ -16,8 +16,17 @@ import { INITIAL_PATIENTS, INITIAL_APPOINTMENTS, INITIAL_EXPENSES } from '../src
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Detect serverless environment (Netlify, AWS Lambda, Vercel)
+const IS_SERVERLESS = !!(
+  process.env.NETLIFY ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT ||
+  process.env.VERCEL
+);
+
 const ROOT_DIR = path.resolve(__dirname, '..');
-const DATA_DIR = path.join(ROOT_DIR, 'data');
+const DATA_DIR = IS_SERVERLESS ? '/tmp' : path.join(ROOT_DIR, 'data');
 const DB_FILE = path.join(DATA_DIR, 'clinic_db.json');
 
 // Ensure data directory exists
@@ -43,13 +52,13 @@ export function getClinicData() {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.patients)) {
+      if (parsed) {
         clinicData = {
           version: typeof parsed.version === 'number' ? parsed.version : 1,
           lastUpdated: parsed.lastUpdated || new Date().toISOString(),
-          patients: Array.isArray(parsed.patients) ? parsed.patients : [],
-          appointments: Array.isArray(parsed.appointments) ? parsed.appointments : [],
-          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : []
+          patients: (Array.isArray(parsed.patients) && parsed.patients.length > 0) ? parsed.patients : JSON.parse(JSON.stringify(INITIAL_PATIENTS)),
+          appointments: (Array.isArray(parsed.appointments) && parsed.appointments.length > 0) ? parsed.appointments : JSON.parse(JSON.stringify(INITIAL_APPOINTMENTS)),
+          expenses: (Array.isArray(parsed.expenses) && parsed.expenses.length > 0) ? parsed.expenses : JSON.parse(JSON.stringify(INITIAL_EXPENSES))
         };
         console.log(`[ClinicSync] Loaded database from disk: ${clinicData.patients.length} patients, ${clinicData.appointments.length} appointments, ${clinicData.expenses.length} expenses (version: ${clinicData.version}).`);
         return clinicData;
@@ -135,18 +144,47 @@ if (heartbeatTimer.unref) {
 }
 
 /**
- * Parse incoming JSON body
+ * Parse incoming JSON body with safety against pre-parsed bodies and timeouts
  */
 function parseRequestBody(req) {
+  // If body is already parsed by middleware or express
+  if (req.body && typeof req.body === 'object') {
+    return Promise.resolve(req.body);
+  }
+  if (typeof req.body === 'string' && req.body.trim()) {
+    try {
+      return Promise.resolve(JSON.parse(req.body));
+    } catch (err) {
+      return Promise.reject(new Error('Invalid JSON format: ' + err.message));
+    }
+  }
+
   return new Promise((resolve, reject) => {
+    if (req.readableEnded || req.complete) {
+      return resolve({});
+    }
+
     let body = '';
+    const timeout = setTimeout(() => {
+      if (body.trim()) {
+        try {
+          return resolve(JSON.parse(body));
+        } catch {}
+      }
+      resolve({});
+    }, 4000);
+    if (timeout.unref) timeout.unref();
+
     req.on('data', chunk => {
       body += chunk;
       if (body.length > 50 * 1024 * 1024) {
+        clearTimeout(timeout);
         reject(new Error('Payload too large'));
       }
     });
+
     req.on('end', () => {
+      clearTimeout(timeout);
       if (!body.trim()) {
         return resolve({});
       }
@@ -156,7 +194,11 @@ function parseRequestBody(req) {
         reject(new Error('Invalid JSON format: ' + err.message));
       }
     });
-    req.on('error', reject);
+
+    req.on('error', err => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
 }
 
@@ -383,7 +425,7 @@ export async function handleApiRequest(req, res) {
         appt.id = Date.now();
       }
 
-      const index = data.appointments.findIndex(a => String(a.id) === String(appt.id));
+      const index = data.appointments.findIndex(a => String(a.id).trim().toLowerCase() === String(appt.id).trim().toLowerCase());
       if (index >= 0) {
         data.appointments[index] = { ...data.appointments[index], ...appt };
       } else {
@@ -415,7 +457,11 @@ export async function handleApiRequest(req, res) {
       const body = await parseRequestBody(req);
       const { id, status } = body;
 
-      const appt = data.appointments.find(a => String(a.id) === String(id));
+      if (!id || !status) {
+        return sendJson(400, { success: false, error: 'Appointment id and status are required' });
+      }
+
+      const appt = data.appointments.find(a => String(a.id).trim().toLowerCase() === String(id).trim().toLowerCase());
       if (appt) {
         appt.status = status;
         data.version = (data.version || 0) + 1;
@@ -447,7 +493,7 @@ export async function handleApiRequest(req, res) {
     if (pathname.startsWith('/api/appointments/') && method === 'DELETE') {
       const id = decodeURIComponent(pathname.replace('/api/appointments/', '')).trim();
       const initialCount = data.appointments.length;
-      data.appointments = data.appointments.filter(a => String(a.id) !== String(id));
+      data.appointments = data.appointments.filter(a => String(a.id).trim().toLowerCase() !== id.toLowerCase());
 
       if (data.appointments.length === initialCount) {
         return sendJson(404, { success: false, error: 'Appointment not found' });
@@ -511,7 +557,7 @@ export async function handleApiRequest(req, res) {
     if (pathname.startsWith('/api/expenses/') && method === 'DELETE') {
       const id = decodeURIComponent(pathname.replace('/api/expenses/', '')).trim();
       const initialCount = data.expenses.length;
-      data.expenses = data.expenses.filter(e => String(e.id) !== String(id));
+      data.expenses = data.expenses.filter(e => String(e.id).trim() !== id);
 
       if (data.expenses.length === initialCount) {
         return sendJson(404, { success: false, error: 'Expense record not found' });

@@ -7,6 +7,7 @@
  * - Automatic real-time updates via Server-Sent Events (SSE)
  * - Automatic fallback background polling ensures all tabs/browsers/devices stay identical
  * - Cross-device and cross-user synchronization guaranteed
+ * - Resilient network layer with auto-retry on 502/503/504 gateway cold-starts
  */
 
 import { INITIAL_PATIENTS, INITIAL_APPOINTMENTS, INITIAL_EXPENSES } from '../data/mockData';
@@ -50,6 +51,32 @@ class ClinicSyncService {
 
     // Setup cross-tab BroadcastChannel
     this.initBroadcastChannel();
+  }
+
+  /**
+   * Safe fetch with automatic retry on 502/503/504 Bad Gateway / cold-start conditions
+   */
+  async safeFetch(url, options, retries = 1) {
+    try {
+      const res = await fetch(url, options);
+      if ((res.status === 502 || res.status === 503 || res.status === 504) && retries > 0) {
+        await new Promise(r => setTimeout(r, 400));
+        return this.safeFetch(url, options, retries - 1);
+      }
+      let json = {};
+      try {
+        json = await res.json();
+      } catch {
+        json = { error: `Server response error (HTTP ${res.status})` };
+      }
+      return { ok: res.ok, status: res.status, json };
+    } catch (err) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, 400));
+        return this.safeFetch(url, options, retries - 1);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -187,16 +214,15 @@ class ClinicSyncService {
    */
   async checkServerStatusOrData() {
     try {
-      const res = await fetch('/api/status', {
+      const { ok, status, json } = await this.safeFetch('/api/status', {
         headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+      if (!ok) {
+        throw new Error(`HTTP ${status}`);
       }
 
-      const json = await res.json();
       this.isServerReachable = true;
 
       // If server version is ahead of our current version, fetch complete updated dataset
@@ -216,17 +242,12 @@ class ClinicSyncService {
    */
   async fetchServerData(notifyIfSame = true) {
     try {
-      const res = await fetch('/api/data', {
+      const { ok, json } = await this.safeFetch('/api/data', {
         headers: { 'Accept': 'application/json' },
         cache: 'no-store'
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const json = await res.json();
-      if (json && json.success && json.data) {
+      if (ok && json.success && json.data) {
         this.isServerReachable = true;
         this.isReady = true;
         this.lastSyncedTime = new Date();
@@ -312,15 +333,14 @@ class ClinicSyncService {
    * Add or Edit Patient
    */
   async savePatient(patient, isEdit) {
-    const res = await fetch('/api/patients', {
+    const { ok, status, json } = await this.safeFetch('/api/patients', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patient, isEdit })
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to save patient (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to save patient (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
@@ -329,10 +349,10 @@ class ClinicSyncService {
     // Update in-memory state
     if (isEdit) {
       this.data.patients = this.data.patients.map(p =>
-        String(p.fileId).trim() === String(patient.fileId).trim() ? { ...p, ...patient } : p
+        String(p.fileId).trim().toLowerCase() === String(patient.fileId).trim().toLowerCase() ? { ...p, ...patient } : p
       );
     } else {
-      this.data.patients = [patient, ...this.data.patients.filter(p => p.fileId !== patient.fileId)];
+      this.data.patients = [patient, ...this.data.patients.filter(p => String(p.fileId).trim().toLowerCase() !== String(patient.fileId).trim().toLowerCase())];
     }
 
     this.broadcastToTabs(isEdit ? 'EDIT_PATIENT' : 'ADD_PATIENT', this.data, this.currentVersion);
@@ -350,19 +370,18 @@ class ClinicSyncService {
    * Delete Patient
    */
   async deletePatient(fileId) {
-    const res = await fetch(`/api/patients/${encodeURIComponent(fileId)}`, {
+    const { ok, status, json } = await this.safeFetch(`/api/patients/${encodeURIComponent(fileId)}`, {
       method: 'DELETE'
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to delete patient (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to delete patient (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
     this.lastSyncedTime = new Date();
 
-    this.data.patients = this.data.patients.filter(p => String(p.fileId).trim() !== String(fileId).trim());
+    this.data.patients = this.data.patients.filter(p => String(p.fileId).trim().toLowerCase() !== String(fileId).trim().toLowerCase());
 
     this.broadcastToTabs('DELETE_PATIENT', this.data, this.currentVersion);
     this.notifySubscribers({
@@ -379,7 +398,7 @@ class ClinicSyncService {
    * Update full patient record (e.g. Case sheet or Follow up)
    */
   async updatePatientDetails(fileId, updatedRecord) {
-    const p = this.data.patients.find(x => String(x.fileId).trim() === String(fileId).trim());
+    const p = this.data.patients.find(x => String(x.fileId).trim().toLowerCase() === String(fileId).trim().toLowerCase());
     const fullPatient = { ...(p || {}), ...updatedRecord, fileId };
     return this.savePatient(fullPatient, true);
   }
@@ -388,22 +407,21 @@ class ClinicSyncService {
    * Add or Edit Appointment
    */
   async saveAppointment(appointment, isEdit = false) {
-    const res = await fetch('/api/appointments', {
+    const { ok, status, json } = await this.safeFetch('/api/appointments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appointment, isEdit })
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to save appointment (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to save appointment (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
     this.lastSyncedTime = new Date();
 
     const savedAppt = json.appointment || appointment;
-    const index = this.data.appointments.findIndex(a => String(a.id) === String(savedAppt.id));
+    const index = this.data.appointments.findIndex(a => String(a.id).trim().toLowerCase() === String(savedAppt.id).trim().toLowerCase());
     if (index >= 0) {
       this.data.appointments[index] = { ...this.data.appointments[index], ...savedAppt };
     } else {
@@ -423,32 +441,47 @@ class ClinicSyncService {
 
   /**
    * Update Appointment Status (In / Closed / Cancelled)
+   * With optimistic local UI and auto-retry
    */
   async updateApptStatus(id, newStatus) {
-    const res = await fetch('/api/appointments/status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status: newStatus })
-    });
+    const prevStatus = this.data.appointments.find(a => String(a.id).trim().toLowerCase() === String(id).trim().toLowerCase())?.status;
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to update appointment status (HTTP ${res.status})`);
-    }
-
-    this.currentVersion = json.version || this.currentVersion + 1;
-    this.lastSyncedTime = new Date();
-
+    // 1. Optimistic update so UI updates immediately
     this.data.appointments = this.data.appointments.map(a =>
-      String(a.id) === String(id) ? { ...a, status: newStatus } : a
+      String(a.id).trim().toLowerCase() === String(id).trim().toLowerCase() ? { ...a, status: newStatus } : a
     );
-
-    this.broadcastToTabs('UPDATE_APPT_STATUS', this.data, this.currentVersion);
     this.notifySubscribers({
       action: 'UPDATE_APPT_STATUS',
       isRemoteUserAction: false,
       data: this.data
     });
+
+    // 2. Commit to database with retry
+    const { ok, status, json } = await this.safeFetch('/api/appointments/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: newStatus })
+    });
+
+    if (!ok || !json.success) {
+      // Revert optimistic update if server failed
+      if (prevStatus) {
+        this.data.appointments = this.data.appointments.map(a =>
+          String(a.id).trim().toLowerCase() === String(id).trim().toLowerCase() ? { ...a, status: prevStatus } : a
+        );
+        this.notifySubscribers({
+          action: 'REVERT_STATUS',
+          isRemoteUserAction: false,
+          data: this.data
+        });
+      }
+      throw new Error(json.error || `Server unavailable (HTTP ${status}). Please ensure server is running.`);
+    }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    this.broadcastToTabs('UPDATE_APPT_STATUS', this.data, this.currentVersion);
     this.notifyStatus();
 
     return json;
@@ -458,19 +491,18 @@ class ClinicSyncService {
    * Delete Appointment
    */
   async deleteAppointment(id) {
-    const res = await fetch(`/api/appointments/${encodeURIComponent(id)}`, {
+    const { ok, status, json } = await this.safeFetch(`/api/appointments/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to delete appointment (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to delete appointment (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
     this.lastSyncedTime = new Date();
 
-    this.data.appointments = this.data.appointments.filter(a => String(a.id) !== String(id));
+    this.data.appointments = this.data.appointments.filter(a => String(a.id).trim().toLowerCase() !== String(id).trim().toLowerCase());
 
     this.broadcastToTabs('DELETE_APPOINTMENT', this.data, this.currentVersion);
     this.notifySubscribers({
@@ -487,15 +519,14 @@ class ClinicSyncService {
    * Record Clinic Expense
    */
   async saveExpense(expense) {
-    const res = await fetch('/api/expenses', {
+    const { ok, status, json } = await this.safeFetch('/api/expenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expense })
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to save expense (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to save expense (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
@@ -519,19 +550,18 @@ class ClinicSyncService {
    * Delete Expense
    */
   async deleteExpense(id) {
-    const res = await fetch(`/api/expenses/${encodeURIComponent(id)}`, {
+    const { ok, status, json } = await this.safeFetch(`/api/expenses/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to delete expense (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to delete expense (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;
     this.lastSyncedTime = new Date();
 
-    this.data.expenses = this.data.expenses.filter(e => String(e.id) !== String(id));
+    this.data.expenses = this.data.expenses.filter(e => String(e.id).trim().toLowerCase() !== String(id).trim().toLowerCase());
 
     this.broadcastToTabs('DELETE_EXPENSE', this.data, this.currentVersion);
     this.notifySubscribers({
@@ -548,11 +578,10 @@ class ClinicSyncService {
    * Reset Central Database to Default Seed Data
    */
   async resetToDefault() {
-    const res = await fetch('/api/reset', { method: 'POST' });
+    const { ok, status, json } = await this.safeFetch('/api/reset', { method: 'POST' });
 
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || `Failed to reset database (HTTP ${res.status})`);
+    if (!ok || !json.success) {
+      throw new Error(json.error || `Failed to reset database (HTTP ${status})`);
     }
 
     this.currentVersion = json.version || this.currentVersion + 1;

@@ -19,25 +19,53 @@ export async function handler(event, context) {
     return { statusCode: 204, headers, body: '' };
   }
 
-  const rawPath = event.path || '';
-  // Normalize path removing /.netlify/functions/api or /api
-  let pathname = rawPath.replace('/.netlify/functions/api', '/api');
+  // Extract clean pathname from Netlify event
+  let pathname = event.path || '';
+  if (pathname.includes('/.netlify/functions/api')) {
+    pathname = pathname.replace('/.netlify/functions/api', '/api');
+  }
   if (!pathname.startsWith('/api')) {
     pathname = '/api' + (pathname.startsWith('/') ? pathname : '/' + pathname);
   }
+  pathname = pathname.split('?')[0].replace(/\/+$/, '');
+  if (!pathname) pathname = '/api';
 
   const method = (event.httpMethod || 'GET').toUpperCase();
   const data = getClinicData();
 
   try {
-    let body = {};
-    if (event.body) {
+    let rawBody = event.body || '';
+    if (event.isBase64Encoded && rawBody) {
       try {
-        body = JSON.parse(event.body);
+        rawBody = Buffer.from(rawBody, 'base64').toString('utf8');
       } catch {}
     }
 
-    // Health
+    let body = {};
+    if (rawBody && typeof rawBody === 'string') {
+      try {
+        body = JSON.parse(rawBody);
+      } catch {}
+    } else if (rawBody && typeof rawBody === 'object') {
+      body = rawBody;
+    }
+
+    // Server-Sent Events on Netlify: Return instant connected response rather than hanging container
+    if (pathname === '/api/events') {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          type: 'CONNECTED',
+          version: data.version,
+          lastUpdated: data.lastUpdated,
+          connectedUsers: 1,
+          timestamp: Date.now()
+        })
+      };
+    }
+
+    // Health / Status
     if (pathname === '/api/status' && method === 'GET') {
       return {
         statusCode: 200,
@@ -139,7 +167,7 @@ export async function handler(event, context) {
       }
       if (!appt.id) appt.id = Date.now();
 
-      const index = data.appointments.findIndex(a => String(a.id) === String(appt.id));
+      const index = data.appointments.findIndex(a => String(a.id).trim().toLowerCase() === String(appt.id).trim().toLowerCase());
       if (index >= 0) {
         data.appointments[index] = { ...data.appointments[index], ...appt };
       } else {
@@ -153,12 +181,16 @@ export async function handler(event, context) {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, appointment: appt, version: data.version }) };
     }
 
-    // Appointment status
+    // Appointment status change
     if (pathname === '/api/appointments/status' && method === 'POST') {
       const { id, status } = body;
-      const appt = data.appointments.find(a => String(a.id) === String(id));
+      if (!id || !status) {
+        return { statusCode: 400, headers, body: JSON.stringify({ success: false, error: 'Appointment id and status are required' }) };
+      }
+
+      const appt = data.appointments.find(a => String(a.id).trim().toLowerCase() === String(id).trim().toLowerCase());
       if (!appt) {
-        return { statusCode: 404, headers, body: JSON.stringify({ success: false, error: 'Appointment not found' }) };
+        return { statusCode: 404, headers, body: JSON.stringify({ success: false, error: `Appointment "${id}" not found` }) };
       }
 
       appt.status = status;
@@ -172,7 +204,7 @@ export async function handler(event, context) {
     // Appointment delete
     if (pathname.startsWith('/api/appointments/') && method === 'DELETE') {
       const id = decodeURIComponent(pathname.replace('/api/appointments/', '')).trim();
-      data.appointments = data.appointments.filter(a => String(a.id) !== String(id));
+      data.appointments = data.appointments.filter(a => String(a.id).trim().toLowerCase() !== id.toLowerCase());
 
       data.version = (data.version || 0) + 1;
       data.lastUpdated = new Date().toISOString();
@@ -197,7 +229,7 @@ export async function handler(event, context) {
     // Expenses delete
     if (pathname.startsWith('/api/expenses/') && method === 'DELETE') {
       const id = decodeURIComponent(pathname.replace('/api/expenses/', '')).trim();
-      data.expenses = data.expenses.filter(e => String(e.id) !== String(id));
+      data.expenses = data.expenses.filter(e => String(e.id).trim() !== id);
 
       data.version = (data.version || 0) + 1;
       data.lastUpdated = new Date().toISOString();
@@ -231,4 +263,3 @@ export async function handler(event, context) {
     };
   }
 }
-

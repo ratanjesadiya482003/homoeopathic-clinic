@@ -1,6 +1,6 @@
 {
-  "version": 14,
-  "lastUpdated": "2026-11-21T08:43:32.015Z",
+  "version": 27,
+  "lastUpdated": "2026-11-21T08:59:41.076Z",
   "patients": [
     {
       "id": "0842",
@@ -355,7 +355,7 @@
       "date": "2026-11-19",
       "type": "In Clinic",
       "charge": "500.00",
-      "status": "In"
+      "status": "Closed"
     },
     {
       "id": "apt-7",
@@ -366,7 +366,7 @@
       "date": "2026-11-19",
       "type": "In Clinic",
       "charge": "500.00",
-      "status": "Confirmed"
+      "status": "In"
     }
   ],
   "expenses": [
