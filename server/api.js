@@ -6,6 +6,7 @@
  * - REST API (/api/data, /api/patients, /api/appointments, /api/expenses)
  * - Real-Time Server-Sent Events (SSE) broadcasting (/api/events)
  * - Automatic seed initialization from src/data/mockData.js
+ * - Cross-device & cross-browser synchronization
  */
 
 import fs from 'fs';
@@ -21,7 +22,11 @@ const DB_FILE = path.join(DATA_DIR, 'clinic_db.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('[ClinicSync] Could not create DATA_DIR:', err.message);
+  }
 }
 
 // In-memory active state
@@ -29,7 +34,7 @@ let clinicData = null;
 const sseClients = new Set();
 
 /**
- * Initialize or load database
+ * Initialize or load database from central file
  */
 export function getClinicData() {
   if (clinicData) return clinicData;
@@ -39,8 +44,14 @@ export function getClinicData() {
       const raw = fs.readFileSync(DB_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.patients)) {
-        clinicData = parsed;
-        console.log(`[ClinicSync] Loaded database from disk: ${clinicData.patients.length} patients, ${clinicData.appointments?.length || 0} appointments.`);
+        clinicData = {
+          version: typeof parsed.version === 'number' ? parsed.version : 1,
+          lastUpdated: parsed.lastUpdated || new Date().toISOString(),
+          patients: Array.isArray(parsed.patients) ? parsed.patients : [],
+          appointments: Array.isArray(parsed.appointments) ? parsed.appointments : [],
+          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : []
+        };
+        console.log(`[ClinicSync] Loaded database from disk: ${clinicData.patients.length} patients, ${clinicData.appointments.length} appointments, ${clinicData.expenses.length} expenses (version: ${clinicData.version}).`);
         return clinicData;
       }
     }
@@ -63,18 +74,23 @@ export function getClinicData() {
 }
 
 /**
- * Persist current state to JSON file
+ * Safe persistence to JSON file
+ * Avoids Windows rename locking issues by writing directly with UTF-8
  */
-function saveToDisk() {
+export function saveToDisk() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tempFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(clinicData, null, 2), 'utf8');
-    fs.renameSync(tempFile, DB_FILE);
+    const jsonString = JSON.stringify(clinicData, null, 2);
+    fs.writeFileSync(DB_FILE, jsonString, 'utf8');
   } catch (err) {
     console.error('[ClinicSync] Failed to persist database to disk:', err.message);
+    try {
+      fs.writeFileSync(`${DB_FILE}.bak`, JSON.stringify(clinicData, null, 2), 'utf8');
+    } catch (e2) {
+      console.error('[ClinicSync] Backup write also failed:', e2.message);
+    }
   }
 }
 
@@ -88,6 +104,9 @@ export function broadcastEvent(event) {
   for (const client of sseClients) {
     try {
       client.write(payload);
+      if (typeof client.flush === 'function') {
+        client.flush();
+      }
     } catch {
       deadClients.push(client);
     }
@@ -98,16 +117,22 @@ export function broadcastEvent(event) {
   }
 }
 
-// Heartbeat keep-alive every 25 seconds
-setInterval(() => {
+// Heartbeat keep-alive every 15 seconds (unref so it doesn't block shutdown)
+const heartbeatTimer = setInterval(() => {
   for (const client of sseClients) {
     try {
       client.write(': heartbeat\n\n');
+      if (typeof client.flush === 'function') {
+        client.flush();
+      }
     } catch {
       sseClients.delete(client);
     }
   }
-}, 25000);
+}, 15000);
+if (heartbeatTimer.unref) {
+  heartbeatTimer.unref();
+}
 
 /**
  * Parse incoming JSON body
@@ -128,7 +153,7 @@ function parseRequestBody(req) {
       try {
         resolve(JSON.parse(body));
       } catch (err) {
-        reject(new Error('Invalid JSON format'));
+        reject(new Error('Invalid JSON format: ' + err.message));
       }
     });
     req.on('error', reject);
@@ -137,7 +162,7 @@ function parseRequestBody(req) {
 
 /**
  * Central API Request Router & Handler
- * Works both with Node http.createServer and Vite Connect middleware
+ * Works with Node http.createServer, Vite Connect middleware, and serverless functions
  */
 export async function handleApiRequest(req, res) {
   // CORS Headers
@@ -152,7 +177,8 @@ export async function handleApiRequest(req, res) {
     return;
   }
 
-  const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const host = req.headers.host || 'localhost';
+  const urlObj = new URL(req.url, `http://${host}`);
   const pathname = urlObj.pathname;
   const method = req.method.toUpperCase();
 
@@ -161,7 +187,8 @@ export async function handleApiRequest(req, res) {
   const sendJson = (statusCode, obj) => {
     res.writeHead(statusCode, {
       'Content-Type': 'application/json; charset=UTF-8',
-      'Cache-Control': 'no-store, no-cache, must-revalidate'
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma': 'no-cache'
     });
     res.end(JSON.stringify(obj));
   };
@@ -173,8 +200,13 @@ export async function handleApiRequest(req, res) {
         'Content-Type': 'text/event-stream; charset=UTF-8',
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
         'Access-Control-Allow-Origin': '*'
       });
+
+      if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+      }
 
       // Send initial connect notification
       res.write(`data: ${JSON.stringify({
@@ -225,9 +257,9 @@ export async function handleApiRequest(req, res) {
     // 4. Batch Sync / Overwrite
     if (pathname === '/api/sync' && method === 'POST') {
       const body = await parseRequestBody(req);
-      if (body.patients) data.patients = body.patients;
-      if (body.appointments) data.appointments = body.appointments;
-      if (body.expenses) data.expenses = body.expenses;
+      if (Array.isArray(body.patients)) data.patients = body.patients;
+      if (Array.isArray(body.appointments)) data.appointments = body.appointments;
+      if (Array.isArray(body.expenses)) data.expenses = body.expenses;
 
       data.version = (data.version || 0) + 1;
       data.lastUpdated = new Date().toISOString();
@@ -262,21 +294,29 @@ export async function handleApiRequest(req, res) {
         return sendJson(400, { success: false, error: 'Patient data and fileId are required' });
       }
 
+      const fileIdClean = String(patient.fileId).trim();
+      patient.fileId = fileIdClean;
+      if (!patient.id) patient.id = fileIdClean;
+
+      const existingIndex = data.patients.findIndex(
+        p => String(p.fileId).trim().toLowerCase() === fileIdClean.toLowerCase()
+      );
+
       if (isEdit) {
-        const index = data.patients.findIndex(p => p.fileId === patient.fileId);
-        if (index >= 0) {
-          data.patients[index] = { ...data.patients[index], ...patient };
+        if (existingIndex >= 0) {
+          data.patients[existingIndex] = { ...data.patients[existingIndex], ...patient };
         } else {
           data.patients.unshift(patient);
         }
       } else {
-        // New patient: avoid duplicate fileId
-        const existingIdx = data.patients.findIndex(p => p.fileId === patient.fileId);
-        if (existingIdx >= 0) {
-          data.patients[existingIdx] = { ...data.patients[existingIdx], ...patient };
-        } else {
-          data.patients.unshift(patient);
+        // New patient: prevent duplicate fileId
+        if (existingIndex >= 0) {
+          return sendJson(409, {
+            success: false,
+            error: `A patient with File ID "${fileIdClean}" already exists. Please choose a different File ID.`
+          });
         }
+        data.patients.unshift(patient);
       }
 
       data.version = (data.version || 0) + 1;
@@ -302,12 +342,12 @@ export async function handleApiRequest(req, res) {
 
     // 6. Patient Delete
     if (pathname.startsWith('/api/patients/') && method === 'DELETE') {
-      const fileId = decodeURIComponent(pathname.replace('/api/patients/', ''));
+      const fileId = decodeURIComponent(pathname.replace('/api/patients/', '')).trim();
       const initialCount = data.patients.length;
-      data.patients = data.patients.filter(p => p.fileId !== fileId);
+      data.patients = data.patients.filter(p => String(p.fileId).trim() !== fileId);
 
       if (data.patients.length === initialCount) {
-        return sendJson(404, { success: false, error: 'Patient not found' });
+        return sendJson(404, { success: false, error: `Patient with File ID ${fileId} not found` });
       }
 
       data.version = (data.version || 0) + 1;
@@ -335,11 +375,15 @@ export async function handleApiRequest(req, res) {
       const body = await parseRequestBody(req);
       const appt = body.appointment || body;
 
-      if (!appt || !appt.id) {
-        return sendJson(400, { success: false, error: 'Appointment id is required' });
+      if (!appt || (!appt.id && !appt.fileId)) {
+        return sendJson(400, { success: false, error: 'Appointment details are required' });
       }
 
-      const index = data.appointments.findIndex(a => a.id === appt.id);
+      if (!appt.id) {
+        appt.id = Date.now();
+      }
+
+      const index = data.appointments.findIndex(a => String(a.id) === String(appt.id));
       if (index >= 0) {
         data.appointments[index] = { ...data.appointments[index], ...appt };
       } else {
@@ -371,7 +415,7 @@ export async function handleApiRequest(req, res) {
       const body = await parseRequestBody(req);
       const { id, status } = body;
 
-      const appt = data.appointments.find(a => a.id === id);
+      const appt = data.appointments.find(a => String(a.id) === String(id));
       if (appt) {
         appt.status = status;
         data.version = (data.version || 0) + 1;
@@ -401,8 +445,13 @@ export async function handleApiRequest(req, res) {
 
     // 9. Appointment Delete
     if (pathname.startsWith('/api/appointments/') && method === 'DELETE') {
-      const id = decodeURIComponent(pathname.replace('/api/appointments/', ''));
+      const id = decodeURIComponent(pathname.replace('/api/appointments/', '')).trim();
+      const initialCount = data.appointments.length;
       data.appointments = data.appointments.filter(a => String(a.id) !== String(id));
+
+      if (data.appointments.length === initialCount) {
+        return sendJson(404, { success: false, error: 'Appointment not found' });
+      }
 
       data.version = (data.version || 0) + 1;
       data.lastUpdated = new Date().toISOString();
@@ -428,6 +477,10 @@ export async function handleApiRequest(req, res) {
     if (pathname === '/api/expenses' && method === 'POST') {
       const body = await parseRequestBody(req);
       const expense = body.expense || body;
+
+      if (!expense.title || expense.amount === undefined) {
+        return sendJson(400, { success: false, error: 'Expense title and amount are required' });
+      }
 
       if (!expense.id) {
         expense.id = Date.now();
@@ -456,8 +509,13 @@ export async function handleApiRequest(req, res) {
 
     // 11. Expense Delete
     if (pathname.startsWith('/api/expenses/') && method === 'DELETE') {
-      const id = decodeURIComponent(pathname.replace('/api/expenses/', ''));
+      const id = decodeURIComponent(pathname.replace('/api/expenses/', '')).trim();
+      const initialCount = data.expenses.length;
       data.expenses = data.expenses.filter(e => String(e.id) !== String(id));
+
+      if (data.expenses.length === initialCount) {
+        return sendJson(404, { success: false, error: 'Expense record not found' });
+      }
 
       data.version = (data.version || 0) + 1;
       data.lastUpdated = new Date().toISOString();
@@ -513,4 +571,3 @@ export async function handleApiRequest(req, res) {
     return sendJson(500, { success: false, error: err.message });
   }
 }
-

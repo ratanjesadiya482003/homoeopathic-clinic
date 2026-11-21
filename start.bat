@@ -1,8 +1,8 @@
 @echo off
-title  Homoeopathy React App
+title  Homoeopathy Central Multi-User Clinic System
 echo =======================================================
-echo Starting  Homoeopathy React Website...
+echo Starting  Homoeopathy Central Multi-User Clinic Server...
 echo =======================================================
 start http://localhost:3000
-npm run dev
+call npm.cmd run dev
 pause

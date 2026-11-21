@@ -1,17 +1,27 @@
 /**
  * Clinic Real-Time Multi-User Synchronization Service
  * 
- * Ensures ALL users across different tabs, computers, tablets, and phones
- * see the EXACT SAME data in real-time when changes (add, edit, delete) happen.
+ * Centralized Data Management:
+ * - Central database is the SINGLE source of truth
+ * - Browser localStorage / local-only persistence for clinic data is completely removed
+ * - Automatic real-time updates via Server-Sent Events (SSE)
+ * - Automatic fallback background polling ensures all tabs/browsers/devices stay identical
+ * - Cross-device and cross-user synchronization guaranteed
  */
 
 import { INITIAL_PATIENTS, INITIAL_APPOINTMENTS, INITIAL_EXPENSES } from '../data/mockData';
 
-const LOCAL_STORAGE_KEY_PATIENTS = '_react_patients';
-const LOCAL_STORAGE_KEY_APPOINTMENTS = '_react_appointments';
-const LOCAL_STORAGE_KEY_EXPENSES = '_react_expenses';
-const LOCAL_STORAGE_KEY_VERSION = '_react_sync_version';
-const LOCAL_STORAGE_KEY_LAST_SYNCED = '_react_last_synced';
+// Legacy keys to purge completely so no stale local-only data interferes
+const LEGACY_STORAGE_KEYS = [
+  '_react_patients',
+  '_react_appointments',
+  '_react_expenses',
+  '_patients',
+  '_appointments',
+  '_expenses',
+  '_react_sync_version',
+  '_react_last_synced'
+];
 
 class ClinicSyncService {
   constructor() {
@@ -23,41 +33,41 @@ class ClinicSyncService {
     this.reconnectTimeout = null;
     this.isLiveSynced = false;
     this.isServerReachable = false;
+    this.isReady = false;
     this.lastSyncedTime = new Date();
     this.currentVersion = 0;
     this.isInitialized = false;
 
-    // In-memory data store
+    // Purge old local-only storage to guarantee centralized source of truth
+    this.purgeLegacyStorage();
+
+    // Central in-memory state (seeded temporarily until central database responds)
     this.data = {
-      patients: this.loadLocal(LOCAL_STORAGE_KEY_PATIENTS, INITIAL_PATIENTS),
-      appointments: this.loadLocal(LOCAL_STORAGE_KEY_APPOINTMENTS, INITIAL_APPOINTMENTS),
-      expenses: this.loadLocal(LOCAL_STORAGE_KEY_EXPENSES, INITIAL_EXPENSES)
+      patients: JSON.parse(JSON.stringify(INITIAL_PATIENTS)),
+      appointments: JSON.parse(JSON.stringify(INITIAL_APPOINTMENTS)),
+      expenses: JSON.parse(JSON.stringify(INITIAL_EXPENSES))
     };
 
     // Setup cross-tab BroadcastChannel
     this.initBroadcastChannel();
   }
 
-  loadLocal(key, fallback) {
-    try {
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : fallback;
-    } catch {
-      return fallback;
+  /**
+   * Purge any lingering localStorage items from previous versions
+   */
+  purgeLegacyStorage() {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      LEGACY_STORAGE_KEYS.forEach(key => {
+        try {
+          localStorage.removeItem(key);
+        } catch {}
+      });
     }
   }
 
-  saveLocal(data) {
-    try {
-      if (data.patients) localStorage.setItem(LOCAL_STORAGE_KEY_PATIENTS, JSON.stringify(data.patients));
-      if (data.appointments) localStorage.setItem(LOCAL_STORAGE_KEY_APPOINTMENTS, JSON.stringify(data.appointments));
-      if (data.expenses) localStorage.setItem(LOCAL_STORAGE_KEY_EXPENSES, JSON.stringify(data.expenses));
-      localStorage.setItem(LOCAL_STORAGE_KEY_LAST_SYNCED, new Date().toISOString());
-    } catch (e) {
-      console.warn('[Sync] Local storage quota exceeded or unavailable', e);
-    }
-  }
-
+  /**
+   * Cross-tab broadcast within the same browser
+   */
   initBroadcastChannel() {
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
@@ -65,29 +75,38 @@ class ClinicSyncService {
         this.broadcastChannel.onmessage = (event) => {
           const msg = event.data;
           if (msg && msg.type === 'CROSS_TAB_SYNC') {
-            this.handleRemoteUpdate(msg.payload, true, msg.action || 'Tab update');
+            this.handleRemoteUpdate(msg.payload, true, msg.action || 'Tab update', msg.version);
           }
         };
       } catch (e) {
-        console.warn('[Sync] BroadcastChannel init error', e);
+        console.warn('[Sync] BroadcastChannel init error:', e);
       }
     }
   }
 
+  /**
+   * Initialize sync engine:
+   * 1. Fetch initial server data
+   * 2. Connect real-time Server-Sent Events (SSE)
+   * 3. Start background polling fallback
+   */
   init() {
     if (this.isInitialized) return;
     this.isInitialized = true;
 
-    // 1. Fetch initial server data
-    this.fetchServerData();
+    // 1. Fetch initial data from central database
+    this.fetchServerData(true);
 
-    // 2. Start Real-Time Server-Sent Events (SSE)
+    // 2. Connect Real-Time SSE
     this.connectSSE();
 
-    // 3. Fallback polling every 8 seconds
+    // 3. Fallback background sync polling (every 4 seconds)
     this.startPolling();
   }
 
+  /**
+   * Server-Sent Events (SSE) for instant cross-device updates
+   */
   connectSSE() {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
 
@@ -95,6 +114,7 @@ class ClinicSyncService {
       try {
         this.eventSource.close();
       } catch {}
+      this.eventSource = null;
     }
 
     try {
@@ -115,9 +135,13 @@ class ClinicSyncService {
             this.isLiveSynced = true;
             this.isServerReachable = true;
             this.lastSyncedTime = new Date();
-            this.notifyStatus();
+            if (payload.version && payload.version !== this.currentVersion) {
+              this.fetchServerData(false);
+            } else {
+              this.notifyStatus();
+            }
           } else if (payload.data) {
-            // Update received from another user or action
+            // Update broadcast from central server (action performed by another user/device)
             this.handleRemoteUpdate(payload.data, true, payload.action, payload.version);
           }
         } catch (e) {
@@ -128,14 +152,18 @@ class ClinicSyncService {
       this.eventSource.onerror = () => {
         this.isLiveSynced = false;
         this.notifyStatus();
-        this.eventSource.close();
-        this.eventSource = null;
+        if (this.eventSource) {
+          try {
+            this.eventSource.close();
+          } catch {}
+          this.eventSource = null;
+        }
 
-        // Reconnect after 4 seconds
+        // Reconnect after 3 seconds
         clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = setTimeout(() => {
           this.connectSSE();
-        }, 4000);
+        }, 3000);
       };
     } catch (e) {
       console.warn('[Sync] Could not initialize EventSource:', e);
@@ -144,14 +172,48 @@ class ClinicSyncService {
     }
   }
 
+  /**
+   * Periodic background polling to guarantee consistency even if SSE is interrupted
+   */
   startPolling() {
     if (this.pollInterval) clearInterval(this.pollInterval);
     this.pollInterval = setInterval(() => {
-      // If SSE isn't active or periodically, poll server to guarantee consistency
-      this.fetchServerData(false);
-    }, 8000);
+      this.checkServerStatusOrData();
+    }, 4000);
   }
 
+  /**
+   * Quick status check or data fetch
+   */
+  async checkServerStatusOrData() {
+    try {
+      const res = await fetch('/api/status', {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      this.isServerReachable = true;
+
+      // If server version is ahead of our current version, fetch complete updated dataset
+      if (typeof json.version === 'number' && json.version !== this.currentVersion) {
+        await this.fetchServerData(false);
+      } else {
+        this.notifyStatus();
+      }
+    } catch {
+      this.isServerReachable = false;
+      this.notifyStatus();
+    }
+  }
+
+  /**
+   * Fetch complete dataset from central database
+   */
   async fetchServerData(notifyIfSame = true) {
     try {
       const res = await fetch('/api/data', {
@@ -166,21 +228,38 @@ class ClinicSyncService {
       const json = await res.json();
       if (json && json.success && json.data) {
         this.isServerReachable = true;
+        this.isReady = true;
         this.lastSyncedTime = new Date();
 
-        const hasChanged = json.version !== this.currentVersion;
-        if (hasChanged) {
-          this.handleRemoteUpdate(json.data, false, 'Server refresh', json.version);
-        } else if (notifyIfSame) {
-          this.notifyStatus();
+        const hasChanged = json.version !== this.currentVersion || !this.isReady;
+        this.currentVersion = json.version || this.currentVersion + 1;
+
+        this.data = {
+          patients: Array.isArray(json.data.patients) ? json.data.patients : [],
+          appointments: Array.isArray(json.data.appointments) ? json.data.appointments : [],
+          expenses: Array.isArray(json.data.expenses) ? json.data.expenses : []
+        };
+
+        if (hasChanged || notifyIfSame) {
+          this.notifySubscribers({
+            action: 'SERVER_REFRESH',
+            isRemoteUserAction: false,
+            data: this.data
+          });
         }
+        this.notifyStatus();
+        return this.data;
       }
-    } catch {
+    } catch (err) {
+      console.warn('[Sync] Could not fetch data from central server:', err.message);
       this.isServerReachable = false;
       this.notifyStatus();
     }
   }
 
+  /**
+   * Handle updates received from remote users or server
+   */
   handleRemoteUpdate(newData, isRemoteUserAction = false, actionType = '', version = null) {
     if (!newData) return;
 
@@ -188,18 +267,14 @@ class ClinicSyncService {
       this.currentVersion = version;
     }
 
-    const updatedPatients = newData.patients || this.data.patients;
-    const updatedAppointments = newData.appointments || this.data.appointments;
-    const updatedExpenses = newData.expenses || this.data.expenses;
-
     this.data = {
-      patients: updatedPatients,
-      appointments: updatedAppointments,
-      expenses: updatedExpenses
+      patients: Array.isArray(newData.patients) ? newData.patients : this.data.patients,
+      appointments: Array.isArray(newData.appointments) ? newData.appointments : this.data.appointments,
+      expenses: Array.isArray(newData.expenses) ? newData.expenses : this.data.expenses
     };
 
     this.lastSyncedTime = new Date();
-    this.saveLocal(this.data);
+    this.isReady = true;
 
     // Notify all UI subscribers
     this.notifySubscribers({
@@ -211,225 +286,296 @@ class ClinicSyncService {
     this.notifyStatus();
   }
 
-  // Broadcast to other tabs on same machine
-  broadcastToTabs(actionType, data) {
+  /**
+   * Broadcast changes to other tabs in the same browser
+   */
+  broadcastToTabs(actionType, data, version) {
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage({
           type: 'CROSS_TAB_SYNC',
           action: actionType,
           payload: data,
+          version,
           timestamp: Date.now()
         });
       } catch {}
     }
   }
 
-  // --- CRUD API METHODS ---
+  // ==========================================
+  // CENTRALIZED CRUD OPERATIONS
+  // All operations commit to the central database
+  // ==========================================
 
+  /**
+   * Add or Edit Patient
+   */
   async savePatient(patient, isEdit) {
-    // 1. Optimistic local update
-    let newPatients;
+    const res = await fetch('/api/patients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patient, isEdit })
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to save patient (HTTP ${res.status})`);
+    }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    // Update in-memory state
     if (isEdit) {
-      newPatients = this.data.patients.map(p => p.fileId === patient.fileId ? { ...p, ...patient } : p);
+      this.data.patients = this.data.patients.map(p =>
+        String(p.fileId).trim() === String(patient.fileId).trim() ? { ...p, ...patient } : p
+      );
     } else {
-      newPatients = [patient, ...this.data.patients];
+      this.data.patients = [patient, ...this.data.patients.filter(p => p.fileId !== patient.fileId)];
     }
 
-    this.data.patients = newPatients;
-    this.saveLocal(this.data);
-    this.broadcastToTabs(isEdit ? 'EDIT_PATIENT' : 'ADD_PATIENT', this.data);
-    this.notifySubscribers({ action: isEdit ? 'EDIT_PATIENT' : 'ADD_PATIENT', isRemoteUserAction: false, data: this.data });
+    this.broadcastToTabs(isEdit ? 'EDIT_PATIENT' : 'ADD_PATIENT', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: isEdit ? 'EDIT_PATIENT' : 'ADD_PATIENT',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
 
-    // 2. Push to server
-    try {
-      const res = await fetch('/api/patients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ patient, isEdit })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server write failed, saved in offline cache:', e);
-    }
+    return json;
   }
 
+  /**
+   * Delete Patient
+   */
   async deletePatient(fileId) {
-    // 1. Optimistic local update
-    this.data.patients = this.data.patients.filter(p => p.fileId !== fileId);
-    this.saveLocal(this.data);
-    this.broadcastToTabs('DELETE_PATIENT', this.data);
-    this.notifySubscribers({ action: 'DELETE_PATIENT', isRemoteUserAction: false, data: this.data });
+    const res = await fetch(`/api/patients/${encodeURIComponent(fileId)}`, {
+      method: 'DELETE'
+    });
 
-    // 2. Push to server
-    try {
-      const res = await fetch(`/api/patients/${encodeURIComponent(fileId)}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server delete failed:', e);
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to delete patient (HTTP ${res.status})`);
     }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    this.data.patients = this.data.patients.filter(p => String(p.fileId).trim() !== String(fileId).trim());
+
+    this.broadcastToTabs('DELETE_PATIENT', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'DELETE_PATIENT',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Update full patient record (e.g. Case sheet or Follow up)
+   */
   async updatePatientDetails(fileId, updatedRecord) {
-    const p = this.data.patients.find(x => x.fileId === fileId);
+    const p = this.data.patients.find(x => String(x.fileId).trim() === String(fileId).trim());
     const fullPatient = { ...(p || {}), ...updatedRecord, fileId };
     return this.savePatient(fullPatient, true);
   }
 
+  /**
+   * Add or Edit Appointment
+   */
   async saveAppointment(appointment, isEdit = false) {
-    // 1. Optimistic update
-    let newAppts;
-    if (isEdit) {
-      newAppts = this.data.appointments.map(a => a.id === appointment.id ? { ...a, ...appointment } : a);
+    const res = await fetch('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appointment, isEdit })
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to save appointment (HTTP ${res.status})`);
+    }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    const savedAppt = json.appointment || appointment;
+    const index = this.data.appointments.findIndex(a => String(a.id) === String(savedAppt.id));
+    if (index >= 0) {
+      this.data.appointments[index] = { ...this.data.appointments[index], ...savedAppt };
     } else {
-      newAppts = [appointment, ...this.data.appointments];
+      this.data.appointments = [savedAppt, ...this.data.appointments];
     }
-    this.data.appointments = newAppts;
-    this.saveLocal(this.data);
-    this.broadcastToTabs('SAVE_APPOINTMENT', this.data);
-    this.notifySubscribers({ action: 'SAVE_APPOINTMENT', isRemoteUserAction: false, data: this.data });
 
-    // 2. Server push
-    try {
-      const res = await fetch('/api/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appointment, isEdit })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server appointment save failed:', e);
-    }
+    this.broadcastToTabs('SAVE_APPOINTMENT', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'SAVE_APPOINTMENT',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Update Appointment Status (In / Closed / Cancelled)
+   */
   async updateApptStatus(id, newStatus) {
-    // 1. Optimistic update
-    this.data.appointments = this.data.appointments.map(a => a.id === id ? { ...a, status: newStatus } : a);
-    this.saveLocal(this.data);
-    this.broadcastToTabs('UPDATE_APPT_STATUS', this.data);
-    this.notifySubscribers({ action: 'UPDATE_APPT_STATUS', isRemoteUserAction: false, data: this.data });
+    const res = await fetch('/api/appointments/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: newStatus })
+    });
 
-    // 2. Server push
-    try {
-      const res = await fetch('/api/appointments/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: newStatus })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server appt status update failed:', e);
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to update appointment status (HTTP ${res.status})`);
     }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    this.data.appointments = this.data.appointments.map(a =>
+      String(a.id) === String(id) ? { ...a, status: newStatus } : a
+    );
+
+    this.broadcastToTabs('UPDATE_APPT_STATUS', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'UPDATE_APPT_STATUS',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Delete Appointment
+   */
   async deleteAppointment(id) {
+    const res = await fetch(`/api/appointments/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to delete appointment (HTTP ${res.status})`);
+    }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
     this.data.appointments = this.data.appointments.filter(a => String(a.id) !== String(id));
-    this.saveLocal(this.data);
-    this.broadcastToTabs('DELETE_APPOINTMENT', this.data);
-    this.notifySubscribers({ action: 'DELETE_APPOINTMENT', isRemoteUserAction: false, data: this.data });
 
-    try {
-      const res = await fetch(`/api/appointments/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server delete appointment failed:', e);
-    }
+    this.broadcastToTabs('DELETE_APPOINTMENT', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'DELETE_APPOINTMENT',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Record Clinic Expense
+   */
   async saveExpense(expense) {
-    const newExpense = { ...expense, id: expense.id || Date.now() };
-    this.data.expenses = [newExpense, ...this.data.expenses];
-    this.saveLocal(this.data);
-    this.broadcastToTabs('ADD_EXPENSE', this.data);
-    this.notifySubscribers({ action: 'ADD_EXPENSE', isRemoteUserAction: false, data: this.data });
+    const res = await fetch('/api/expenses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expense })
+    });
 
-    try {
-      const res = await fetch('/api/expenses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expense: newExpense })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server expense save failed:', e);
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to save expense (HTTP ${res.status})`);
     }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    const savedExpense = json.expense || expense;
+    this.data.expenses = [savedExpense, ...this.data.expenses];
+
+    this.broadcastToTabs('ADD_EXPENSE', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'ADD_EXPENSE',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Delete Expense
+   */
   async deleteExpense(id) {
-    this.data.expenses = this.data.expenses.filter(e => String(e.id) !== String(id));
-    this.saveLocal(this.data);
-    this.broadcastToTabs('DELETE_EXPENSE', this.data);
-    this.notifySubscribers({ action: 'DELETE_EXPENSE', isRemoteUserAction: false, data: this.data });
+    const res = await fetch(`/api/expenses/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
 
-    try {
-      const res = await fetch(`/api/expenses/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server delete expense failed:', e);
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to delete expense (HTTP ${res.status})`);
     }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
+    this.data.expenses = this.data.expenses.filter(e => String(e.id) !== String(id));
+
+    this.broadcastToTabs('DELETE_EXPENSE', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'DELETE_EXPENSE',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
+  /**
+   * Reset Central Database to Default Seed Data
+   */
   async resetToDefault() {
+    const res = await fetch('/api/reset', { method: 'POST' });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || `Failed to reset database (HTTP ${res.status})`);
+    }
+
+    this.currentVersion = json.version || this.currentVersion + 1;
+    this.lastSyncedTime = new Date();
+
     this.data = {
       patients: JSON.parse(JSON.stringify(INITIAL_PATIENTS)),
       appointments: JSON.parse(JSON.stringify(INITIAL_APPOINTMENTS)),
       expenses: JSON.parse(JSON.stringify(INITIAL_EXPENSES))
     };
-    this.saveLocal(this.data);
-    this.broadcastToTabs('RESET_DATA', this.data);
-    this.notifySubscribers({ action: 'RESET_DATA', isRemoteUserAction: false, data: this.data });
 
-    try {
-      const res = await fetch('/api/reset', { method: 'POST' });
-      if (res.ok) {
-        const json = await res.json();
-        this.currentVersion = json.version || this.currentVersion + 1;
-        this.lastSyncedTime = new Date();
-        this.notifyStatus();
-      }
-    } catch (e) {
-      console.warn('[Sync] Server reset failed:', e);
-    }
+    this.broadcastToTabs('RESET_DATA', this.data, this.currentVersion);
+    this.notifySubscribers({
+      action: 'RESET_DATA',
+      isRemoteUserAction: false,
+      data: this.data
+    });
+    this.notifyStatus();
+
+    return json;
   }
 
-  // --- SUBSCRIPTIONS ---
+  // --- UI SUBSCRIPTIONS ---
 
   subscribe(callback) {
     this.subscribers.add(callback);
@@ -465,6 +611,7 @@ class ClinicSyncService {
     return {
       isLiveSynced: this.isLiveSynced,
       isServerReachable: this.isServerReachable,
+      isReady: this.isReady,
       lastSyncedTime: this.lastSyncedTime,
       version: this.currentVersion,
       counts: {
@@ -478,4 +625,3 @@ class ClinicSyncService {
 
 export const syncService = new ClinicSyncService();
 export default syncService;
-

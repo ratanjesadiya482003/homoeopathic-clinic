@@ -13,7 +13,7 @@ import Toast from './components/Toast';
 import { syncService } from './services/syncService';
 
 export default function App() {
-  // Live Synced Global States (Initialized from Central Database & Local Cache)
+  // Live Synced Global States (Initialized from Central Database)
   const [patients, setPatients] = useState(() => syncService.data.patients);
   const [appointments, setAppointments] = useState(() => syncService.data.appointments);
   const [expenses, setExpenses] = useState(() => syncService.data.expenses);
@@ -90,32 +90,40 @@ export default function App() {
 
   // Patient CRUD (Synced in Real-Time to All Users)
   const handleSavePatient = async (formData, isEdit) => {
-    if (isEdit) {
-      const existing = patients.find(p => p.fileId === formData.fileId) || {};
-      const fullRecord = { ...existing, ...formData };
-      await syncService.savePatient(fullRecord, true);
-      showToast(`Patient ${formData.fileId} updated across all users!`, 'success');
-    } else {
-      const newPatient = {
-        ...formData,
-        id: formData.fileId,
-        createdDate: '19th Nov, 2026',
-        remedyHistory: [],
-        appointments: [],
-        followUps: []
-      };
-      await syncService.savePatient(newPatient, false);
-      showToast(`Patient ${formData.firstName} added and synced to all devices!`, 'success');
+    try {
+      if (isEdit) {
+        const existing = patients.find(p => String(p.fileId).trim() === String(formData.fileId).trim()) || {};
+        const fullRecord = { ...existing, ...formData };
+        await syncService.savePatient(fullRecord, true);
+        showToast(`Patient ${formData.fileId} updated across all users!`, 'success');
+      } else {
+        const newPatient = {
+          ...formData,
+          id: formData.fileId,
+          createdDate: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+          remedyHistory: [],
+          appointments: [],
+          followUps: []
+        };
+        await syncService.savePatient(newPatient, false);
+        showToast(`Patient ${formData.firstName} added and synced to all devices!`, 'success');
+      }
+      navigateTo('patients');
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
     }
-    navigateTo('patients');
   };
 
   const handleDeletePatient = async (fileId) => {
-    const p = patients.find((x) => x.fileId === fileId);
+    const p = patients.find((x) => String(x.fileId).trim() === String(fileId).trim());
     if (!p) return;
     if (window.confirm(`Are you sure you want to delete patient: ${p.firstName} ${p.lastName} (${p.fileId})? This will immediately remove it for all users.`)) {
-      await syncService.deletePatient(fileId);
-      showToast(`Patient ${fileId} deleted and updated for all users.`, 'danger');
+      try {
+        await syncService.deletePatient(fileId);
+        showToast(`Patient ${fileId} deleted and updated for all users.`, 'danger');
+      } catch (err) {
+        showToast(`Database Error: ${err.message}`, 'danger');
+      }
     }
   };
 
@@ -125,31 +133,55 @@ export default function App() {
   };
 
   const handleUpdatePatientDetails = async (fileId, updatedRecord) => {
-    await syncService.updatePatientDetails(fileId, updatedRecord);
+    try {
+      await syncService.updatePatientDetails(fileId, updatedRecord);
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   // Appointment operations (Synced in Real-Time)
   const handleUpdateApptStatus = async (id, newStatus) => {
-    await syncService.updateApptStatus(id, newStatus);
+    try {
+      await syncService.updateApptStatus(id, newStatus);
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   const handleBookConfirmed = async (newAppt) => {
-    await syncService.saveAppointment(newAppt, false);
-    showToast('Appointment booked and synced to all devices!', 'success');
+    try {
+      await syncService.saveAppointment(newAppt, false);
+      showToast('Appointment booked and synced to all devices!', 'success');
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   const handleAddNewPatientFromBooking = async (newPatientRecord) => {
-    await syncService.savePatient(newPatientRecord, false);
+    try {
+      await syncService.savePatient(newPatientRecord, false);
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   // Expense operations (Synced in Real-Time)
   const handleAddExpense = async (newExpense) => {
-    await syncService.saveExpense(newExpense);
+    try {
+      await syncService.saveExpense(newExpense);
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   const handleDeleteExpense = async (id) => {
-    await syncService.deleteExpense(id);
-    showToast('Expense record deleted and synced.', 'info');
+    try {
+      await syncService.deleteExpense(id);
+      showToast('Expense record deleted and synced.', 'info');
+    } catch (err) {
+      showToast(`Database Error: ${err.message}`, 'danger');
+    }
   };
 
   // Manual Refresh & Reset
@@ -164,8 +196,12 @@ export default function App() {
 
   const handleResetDatabase = async () => {
     if (window.confirm('Reset all patients, appointments and expenses to the initial clinic demo data? All users will immediately see the reset data.')) {
-      await syncService.resetToDefault();
-      showToast('Clinic database reset to initial demo state.', 'warning');
+      try {
+        await syncService.resetToDefault();
+        showToast('Clinic database reset to initial demo state.', 'warning');
+      } catch (err) {
+        showToast(`Database Error: ${err.message}`, 'danger');
+      }
     }
   };
 
@@ -183,7 +219,7 @@ export default function App() {
     'clinic-info': 'Clinic Information & Settings'
   };
 
-  const activePatient = patients.find((p) => p.fileId === selectedPatientId) || patients[0];
+  const activePatient = patients.find((p) => String(p.fileId).trim() === String(selectedPatientId).trim()) || patients[0];
 
   return (
     <div className="app-container">
